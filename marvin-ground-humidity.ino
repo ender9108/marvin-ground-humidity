@@ -45,9 +45,6 @@ void setup() {
     }
   }
 
-  Serial.print("Uuid : ");
-  Serial.println(buildUuid());
-
   if (false == wifiConnected) {
     WiFi.mode(WIFI_AP);
     WiFi.softAP(wifiSsid, wifiPassword);
