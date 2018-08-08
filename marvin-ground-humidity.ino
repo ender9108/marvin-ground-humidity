@@ -7,7 +7,7 @@
 struct Config {
   char wifiSsid[32];
   char wifiPassword[64];
-  char mqttIp[15];
+  char mqttHost[128];
   int  mqttPort;
   char mqttUsername[32];
   char mqttPassword[64];
@@ -211,7 +211,7 @@ bool wifiConnect() {
 }
 
 bool mqttConnect() {
-    client.setServer(config.mqttIp, config.mqttPort);
+    client.setServer(config.mqttHost, config.mqttPort);
     int count = 0;
 
     while (!client.connected()) {
@@ -269,19 +269,19 @@ void getParametersFromEeprom() {
   Serial.println(config.wifiPassword);
 
 
-  Serial.println("Reading mqtt IP from EEPROM");
+  Serial.println("Reading mqtt host from EEPROM");
 
   for (int i = 96; i < 224; ++i)
   {
     if (EEPROM.read(i) != 0) {
-      config.mqttIp[i] = char(EEPROM.read(i));
+      config.mqttHost[i] = char(EEPROM.read(i));
     }
   }
 
   Serial.print("IP value (length: ");
-  Serial.print(strlen(config.mqttIp));
+  Serial.print(strlen(config.mqttHost));
   Serial.print("): ");
-  Serial.println(config.mqttIp);
+  Serial.println(config.mqttHost);
 
 
   Serial.println("Reading mqtt port from EEPROM");
