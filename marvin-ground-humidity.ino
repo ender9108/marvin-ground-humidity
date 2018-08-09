@@ -1,9 +1,9 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <PubSubClient.h>
-#include <EEPROM.h>
 #include <ESP8266TrueRandom.h>
 #include <FS.h>
+#include <ArduinoJson.h>
 
 struct Config {
   char wifiSsid[32];
@@ -25,6 +25,7 @@ int hground;
 
 const char* wifiSsid = "marvin-ground-humidity";
 const char* wifiPassword = "marvin-ground-humidity";
+const String configFilePath = "/config.json";
 bool wifiConnected = false;
 bool mqttConnected = false;
 const int sensorHA = 0;
@@ -32,17 +33,18 @@ const int sensorHA = 0;
 void setup() {
   Serial.begin(9600);
 
-  EEPROM.begin(512);
-  SPIFFS.begin();
+  if (!SPIFFS.begin()) {
+    SPIFFS.format();
+  }
   
   // Get wifi SSID and PASSW from eeprom
-  getParametersFromEeprom();
-
-  if (true == checkEepromValues()) {
-    wifiConnected = wifiConnect();
-
-    if (true == wifiConnected) {
-      mqttConnected = mqttConnect();
+  if (true == getConfig()) {
+    if (true == checkConfigValues()) {
+      wifiConnected = wifiConnect();
+  
+      if (true == wifiConnected) {
+        mqttConnected = mqttConnect();
+      }
     }
   }
 
@@ -160,15 +162,33 @@ void httpSaveWifiInfoToEeprom() {
   }
 
   if (false == error) {
-    setParametersToEeprom(
-      server.arg("wssid"),
-      server.arg("wpassw"),
-      server.arg("wmqttHost"),
-      server.arg("wmqttPort"),
-      server.arg("wmqttUser"),
-      server.arg("wmqttPass"),
-      server.arg("wmqttChan")
-    );
+    
+    server.arg("wssid").toCharArray(config.wifiSsid, 32);
+    server.arg("wpassw").toCharArray(config.wifiPassword, 64);
+    server.arg("wmqttHost").toCharArray(config.mqttHost, 128);
+    config.mqttPort = server.arg("wmqttPort").toInt();
+    server.arg("wmqttHost").toCharArray(config.mqttUsername, 128);
+    server.arg("wmqttHost").toCharArray(config.mqttPassword, 128);
+    server.arg("wmqttHost").toCharArray(config.mqttPublishChannel, 128);
+
+    Serial.print("wifiSsid : ");
+    Serial.println(config.wifiSsid);
+    Serial.print("wifiPassword : ");
+    Serial.println(config.wifiPassword);
+    Serial.print("mqttHost : ");
+    Serial.println(config.mqttHost);
+    Serial.print("mqttPort : ");
+    Serial.println(config.mqttPort);
+    Serial.print("mqttUsername : ");
+    Serial.println(config.mqttUsername);
+    Serial.print("mqttPassword : ");
+    Serial.println(config.mqttPassword);
+    Serial.print("mqttPublishChannel : ");
+    Serial.println(config.mqttPublishChannel);
+    Serial.print("uuid : ");
+    Serial.println(config.uuid);
+
+    //setConfig();
 
     response  = "\r\n\r\n<!DOCTYPE HTML>\r\n<html><body>";
     response += "<h1>Marvin ground humidity</h1>";
@@ -238,176 +258,106 @@ bool mqttConnect() {
     return false;
 }
 
-void getParametersFromEeprom() {
-  Serial.println("Reading wifi ssid from EEPROM");
+bool getConfig() {
+  File configFile = SPIFFS.open(configFilePath, "r");
 
-  for (int i = 0; i < 32; ++i)
-  {
-    if (EEPROM.read(i) != 0) {
-      config.wifiSsid[i] = char(EEPROM.read(i));
-    }
+  if (!configFile) {
+    Serial.println("Failed to open config file \"" + configFilePath + "\".");
+    return false;
   }
 
-  Serial.print("SSID value (length: ");
-  Serial.print(strlen(config.wifiSsid));
-  Serial.print("): ");
+  size_t size = configFile.size();
+  if (size > 1024) {
+    Serial.println("Config file size is too large");
+    return false;
+  }
+
+  // Allocate a buffer to store contents of the file.
+  std::unique_ptr<char[]> buf(new char[size]);
+
+  // We don't use String here because ArduinoJson library requires the input
+  // buffer to be mutable. If you don't use ArduinoJson, you may as well
+  // use configFile.readString instead.
+  configFile.readBytes(buf.get(), size);
+
+  StaticJsonBuffer<512> jsonBuffer;
+  JsonObject& json = jsonBuffer.parseObject(buf.get());
+
+  if (!json.success()) {
+    Serial.println("Failed to parse config file");
+    return false;
+  }
+
+  // Copy values from the JsonObject to the Config
+  strlcpy(config.wifiSsid, json["wifiSsid"], sizeof(config.wifiSsid));
+  strlcpy(config.wifiPassword, json["wifiPassword"], sizeof(config.wifiPassword));
+  strlcpy(config.mqttHost, json["mqttHost"], sizeof(config.mqttHost));
+  config.mqttPort = json["mqttPort"] | 1883;
+  strlcpy(config.mqttUsername, json["mqttUsername"], sizeof(config.mqttUsername));
+  strlcpy(config.mqttPassword, json["mqttPassword"], sizeof(config.mqttPassword));
+  strlcpy(config.mqttPublishChannel, json["mqttPublishChannel"], sizeof(config.mqttPublishChannel));
+  strlcpy(config.uuid, json["uuid"], sizeof(config.uuid));
+
+  configFile.close();
+
+  Serial.print("wifiSsid : ");
   Serial.println(config.wifiSsid);
-
-
-  Serial.println("Reading wifi password from EEPROM");
-
-  for (int i = 32; i < 96; ++i)
-  {
-    if (EEPROM.read(i) != 0) {
-      config.wifiPassword[i] = char(EEPROM.read(i));
-    }
-  }
-
-  Serial.print("Password value (length: ");
-  Serial.print(strlen(config.wifiPassword));
-  Serial.print("): ");
+  Serial.print("wifiPassword : ");
   Serial.println(config.wifiPassword);
-
-
-  Serial.println("Reading mqtt host from EEPROM");
-
-  for (int i = 96; i < 224; ++i)
-  {
-    if (EEPROM.read(i) != 0) {
-      config.mqttHost[i] = char(EEPROM.read(i));
-    }
-  }
-
-  Serial.print("IP value (length: ");
-  Serial.print(strlen(config.mqttHost));
-  Serial.print("): ");
+  Serial.print("mqttHost : ");
   Serial.println(config.mqttHost);
-
-
-  Serial.println("Reading mqtt port from EEPROM");
-  char tmpPort[15];
-
-  for (int i = 224; i < 230; ++i)
-  {
-    if (EEPROM.read(i) != 0) {
-      tmpPort[i] = char(EEPROM.read(i));
-    }
-  }
-
-  config.mqttPort = atoi(tmpPort);
-
-  Serial.print("Port value : ");
+  Serial.print("mqttPort : ");
   Serial.println(config.mqttPort);
-  
-
-  Serial.println("Reading mqtt username from EEPROM");
-
-  for (int i = 230; i < 262; ++i)
-  {
-    if (EEPROM.read(i) != 0) {
-      config.mqttUsername[i] = char(EEPROM.read(i));
-    }
-  }
-
-  Serial.print("Username value (length: ");
-  Serial.print(strlen(config.mqttUsername));
-  Serial.print("): ");
+  Serial.print("mqttUsername : ");
   Serial.println(config.mqttUsername);
-  
-
-  Serial.println("Reading mqtt password from EEPROM");
-
-  for (int i = 262; i < 326; ++i)
-  {
-    if (EEPROM.read(i) != 0) {
-      config.mqttPassword[i] = char(EEPROM.read(i));
-    }
-  }
-
-  Serial.print("Password value (length: ");
-  Serial.print(strlen(config.mqttPassword));
-  Serial.print("): ");
+  Serial.print("mqttPassword : ");
   Serial.println(config.mqttPassword);
-
-
-  Serial.println("Reading mqtt channel from EEPROM");
-
-  for (int i = 326; i < 454; ++i)
-  {
-    if (EEPROM.read(i) != 0) {
-      config.mqttPublishChannel[i] = char(EEPROM.read(i));
-    }
-  }
-
-  Serial.print("Channel value (length: ");
-  Serial.print(strlen(config.mqttPublishChannel));
-  Serial.print("): ");
+  Serial.print("mqttPublishChannel : ");
   Serial.println(config.mqttPublishChannel);
-
-
-  Serial.println("Reading module uuid from EEPROM");
-
-  for (int i = 454; i < 490; ++i)
-  {
-    if (EEPROM.read(i) != 0) {
-      config.uuid[i] = char(EEPROM.read(i));
-    }
-  }
-
-  Serial.print("Uuid value (length: ");
-  Serial.print(strlen(config.uuid));
-  Serial.print("): ");
+  Serial.print("uuid : ");
   Serial.println(config.uuid);
+
+  return true;
 }
 
-void setParametersToEeprom(
-  String wssid, 
-  String wpassw,
-  String wmqttHost,
-  String wmqttPort,
-  String wmqttUser,
-  String wmqttPass,
-  String wmqttChan
-) {
-  clearEeprom();
-  delay(100);
+bool setConfig() {
+  StaticJsonBuffer<512> jsonBuffer;
+  JsonObject& json = jsonBuffer.createObject();
+  
+  json["wifiSsid"] = config.wifiSsid;
+  json["wifiPassword"] = config.wifiPassword;
+  json["mqttHost"] = config.mqttHost;
+  json["mqttPort"] = config.mqttPort;
+  json["mqttUsername"] = config.mqttUsername;
+  json["mqttPassword"] = config.mqttPassword;
+  json["mqttPublishChannel"] = config.mqttPublishChannel;
 
-  int stepAddr = 0;
-  stepAddr = writeEeprom(wssid, stepAddr);
-  stepAddr = writeEeprom(wpassw, (stepAddr+32));
-  /*stepAddr = writeEeprom(wmqttHost, (stepAddr+64));
-  stepAddr = writeEeprom(wmqttPort, (stepAddr+128));
-  stepAddr = writeEeprom(wmqttUser, (stepAddr+6));
-  stepAddr = writeEeprom(wmqttPass, (stepAddr+32));
-  stepAddr = writeEeprom(wmqttChan, (stepAddr+64));
-  if (strlen(config.uuid) == 0) {
-    String myUuid = buildUuid();
-    stepAddr = writeEeprom(myUuid, (stepAddr+128));
-  }*/
-
-  delay(100);
-  getParametersFromEeprom();
-}
-
-int writeEeprom(String value, int stepAddr) {
-  Serial.print("stepAddr");
-  Serial.println(stepAddr);
-  if (value.length() > 1) {
-    for (int i = 0; i < value.length(); ++i) {
-      EEPROM.write(stepAddr+i, value[i]);
-    }
-
-    Serial.print("Write on EEPROM : ");
-    Serial.println(value);
-
-    EEPROM.commit();
+  if (config.uuid == "") {
+    String tmpUuid = buildUuid();
+    tmpUuid.toCharArray(config.uuid, 64);
+    json["uuid"] = config.uuid;
   }
 
-  delay(1000);
-  return stepAddr;
+  if (SPIFFS.exists(configFilePath)) {
+    SPIFFS.remove(configFilePath);
+  }
+
+  File configFile = SPIFFS.open(configFilePath, "w");
+  
+  if (!configFile) {
+    Serial.println("Failed to open config file for writing");
+    return false;
+  }
+
+  json.printTo(configFile);
+
+  delay(100);
+  getConfig();
+
+  return true;
 }
 
-bool checkEepromValues() {
+bool checkConfigValues() {
   Serial.print("config.wifiSsid length : ");
   Serial.println(strlen(config.wifiSsid));
 
@@ -420,16 +370,6 @@ bool checkEepromValues() {
 
   Serial.println("Ssid and passw not present in EEPROM");
   return false;
-}
-
-void clearEeprom() {
-  Serial.println("Clearing Eeprom");
-  
-  for (int i = 0; i < 512; ++i) {
-    EEPROM.write(i, 0);
-  }
-
-  EEPROM.commit();
 }
 
 String buildUuid() {

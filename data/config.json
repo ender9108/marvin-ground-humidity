@@ -1,1 +1,1 @@
-{"wifiSsid": "","wifiPassword": "","mqttHost": "","mqttPort": "","mqttUsername": "","mqttPassword": "","mqttPublishChannel": "","uuid": ""}
+{"wifiSsid": "","wifiPassword": "","mqttHost": "","mqttPort": 1883,"mqttUsername": "","mqttPassword": "","mqttPublishChannel": "","uuid": ""}
