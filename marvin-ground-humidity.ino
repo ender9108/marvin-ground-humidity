@@ -3,6 +3,7 @@
 #include <PubSubClient.h>
 #include <EEPROM.h>
 #include <ESP8266TrueRandom.h>
+#include <FS.h>
 
 struct Config {
   char wifiSsid[32];
@@ -32,8 +33,8 @@ void setup() {
   Serial.begin(9600);
 
   EEPROM.begin(512);
-  clearEeprom();
-
+  SPIFFS.begin();
+  
   // Get wifi SSID and PASSW from eeprom
   getParametersFromEeprom();
 
@@ -53,7 +54,7 @@ void setup() {
     Serial.println(")");
 
     server.on("/", httpParametersPage);
-    server.on("/save", httpSaveWifiInfoToEeprom);
+    server.on("/save", HTTP_POST, httpSaveWifiInfoToEeprom);
     server.on("/restart", httpRestartEsp);
     server.begin();
 
@@ -111,16 +112,16 @@ void httpParametersPage() {
   response  = "\r\n\r\n<!DOCTYPE HTML>\r\n<html><body>";
   response += "<h1>Marvin ground humidity</h1>";
   response += "<h3>Wifi parameters</h3>";
-  response += "<form method=\"GET\" action=\"/save\">";
-  response += "<p><label style=\"min-width:90px;\" for=\"wssid\">Ssid : </label><input maxlength=\"32\" type=\"text\" name=\"wssid\" id=\"wssid\" placeholder=\"SSID (see on your box)\" style=\"border:1px solid #000;width:250px;\"><p>";
-  response += "<p><label style=\"min-width:90px;\" for=\"wpassw\">Passord : </label><input maxlength=\"64\" type=\"password\" name=\"wpassw\" id=\"wpassw\" style=\"border:1px solid #000;width:250px;\"></p>";
+  response += "<form method=\"POST\" action=\"/save\">";
+  response += "<p><label style=\"min-width:90px;\" for=\"wssid\">Ssid : </label><input value=\"Bbox-94FCAFAB\" maxlength=\"32\" type=\"text\" name=\"wssid\" id=\"wssid\" placeholder=\"SSID (see on your box)\" style=\"border:1px solid #000;width:250px;\"><p>";
+  response += "<p><label style=\"min-width:90px;\" for=\"wpassw\">Passord : </label><input value=\"AE55E14D3D4A2ADC1C3E1324AF224C\" maxlength=\"64\" type=\"password\" name=\"wpassw\" id=\"wpassw\" style=\"border:1px solid #000;width:250px;\"></p>";
   response += "<hr>";
   response += "<h3>Mqtt parameters</h3>";
-  response += "<p><label style=\"min-width:90px;\" for=\"wmqttHost\">Host / Ip  : </label><input maxlength=\"128\" type=\"text\" name=\"wmqttHost\" id=\"wmqttHost\" style=\"border:1px solid #000;width:250px;\"><p>";
-  response += "<p><label style=\"min-width:90px;\" for=\"wmqttPort\">Port       : </label><input maxlength=\"6\" type=\"text\" name=\"wmqttPort\" id=\"wmqttPort\" value=\"1883\" style=\"border:1px solid #000;width:250px;\"></p>";
-  response += "<p><label style=\"min-width:90px;\" for=\"wmqttUser\">Username   : </label><input maxlength=\"32\" type=\"text\" name=\"wmqttUser\" id=\"wmqttUser\" style=\"border:1px solid #000;width:250px;\"><p>";
-  response += "<p><label style=\"min-width:90px;\" for=\"wmqttPass\">Passord    : </label><input maxlength=\"64\" type=\"text\" name=\"wmqttPass\" id=\"wmqttPass\" style=\"border:1px solid #000;width:250px;\"></p>";
-  response += "<p><label style=\"min-width:90px;\" for=\"wmqttChan\">Channel    : </label><input maxlength=\"128\" type=\"text\" name=\"wmqttChan\" id=\"wmqttChan\" style=\"border:1px solid #000;width:250px;\"></p>";
+  response += "<p><label style=\"min-width:90px;\" for=\"wmqttHost\">Host / Ip  : </label><input value=\"192.168.1.33\" maxlength=\"128\" type=\"text\" name=\"wmqttHost\" id=\"wmqttHost\" style=\"border:1px solid #000;width:250px;\"><p>";
+  response += "<p><label style=\"min-width:90px;\" for=\"wmqttPort\">Port       : </label><input value=\"1883\" maxlength=\"6\" type=\"text\" name=\"wmqttPort\" id=\"wmqttPort\" style=\"border:1px solid #000;width:250px;\"></p>";
+  response += "<p><label style=\"min-width:90px;\" for=\"wmqttUser\">Username   : </label><input value=\"test\" maxlength=\"32\" type=\"text\" name=\"wmqttUser\" id=\"wmqttUser\" style=\"border:1px solid #000;width:250px;\"><p>";
+  response += "<p><label style=\"min-width:90px;\" for=\"wmqttPass\">Passord    : </label><input value=\"test\" maxlength=\"64\" type=\"text\" name=\"wmqttPass\" id=\"wmqttPass\" style=\"border:1px solid #000;width:250px;\"></p>";
+  response += "<p><label style=\"min-width:90px;\" for=\"wmqttChan\">Channel    : </label><input value=\"/marvin/ground-humidity/values\" maxlength=\"128\" type=\"text\" name=\"wmqttChan\" id=\"wmqttChan\" style=\"border:1px solid #000;width:250px;\"></p>";
   response += "<hr>";
   response += "<p><input type=\"submit\" value=\"Save\"></p>";
   response += "</form>";
@@ -148,11 +149,13 @@ void httpSaveWifiInfoToEeprom() {
   
   if (!server.hasArg("wssid") || !server.hasArg("wpassw")){  
     error = true;
+    Serial.println("No wssid and wpassw args");
     // display error
   }
 
-  if (server.arg("wssid").length() > 1 && server.arg("wpassw").length() > 1) {
+  if (server.arg("wssid").length() <= 1 && server.arg("wpassw").length() <= 1) {
     error = true;
+    Serial.println("wssid and wpassw args is empty");
     // display error
   }
 
@@ -367,92 +370,41 @@ void setParametersToEeprom(
   String wmqttChan
 ) {
   clearEeprom();
-  delay(10);
+  delay(100);
 
   int stepAddr = 0;
-  
-  if (wssid.length() > 1) {
-    for (int i = 0; i < wssid.length(); ++i) {
-      EEPROM.write(stepAddr+i, wssid[i]);
-    }
-
-    Serial.print("Write wssid : ");
-    Serial.println(wssid);
-    stepAddr += 32;
-  }
-
-  if (wpassw.length() > 1) {
-    for (int i = 0; i < wpassw.length(); ++i) {
-      EEPROM.write(stepAddr+i, wpassw[i]);
-    }
-
-    Serial.print("Write wpassw : ");
-    Serial.println(wpassw);
-    stepAddr += 64;
-  }
-
-  if (wmqttHost.length() > 1) {
-    for (int i = 0; i < wmqttHost.length(); ++i) {
-      EEPROM.write(stepAddr+i, wmqttHost[i]);
-    }
-
-    Serial.print("Write wmqttHost : ");
-    Serial.println(wmqttHost);
-    stepAddr += 128;
-  }
-
-  if (wmqttPort.length() > 1) {
-    for (int i = 0; i < wmqttPort.length(); ++i) {
-      EEPROM.write(stepAddr+i, wmqttPort[i]);
-    }
-
-    Serial.print("Write wmqttPort : ");
-    Serial.println(wmqttPort);
-    stepAddr += 6;
-  }
-
-  if (wmqttUser.length() > 1) {
-    for (int i = 0; i < wmqttUser.length(); ++i) {
-      EEPROM.write(stepAddr+i, wmqttUser[i]);
-    }
-
-    Serial.print("Write wmqttUser : ");
-    Serial.println(wmqttUser);
-    stepAddr += 32;
-  }
-
-  if (wmqttPass.length() > 1) {
-    for (int i = 0; i < wmqttPass.length(); ++i) {
-      EEPROM.write(stepAddr+i, wmqttPass[i]);
-    }
-
-    Serial.print("Write wmqttPass : ");
-    Serial.println(wmqttPass);
-    stepAddr += 64;
-  }
-
-  if (wmqttChan.length() > 1) {
-    for (int i = 0; i < wmqttChan.length(); ++i) {
-      EEPROM.write(stepAddr+i, wmqttChan[i]);
-    }
-
-    Serial.print("Write wmqttChan : ");
-    Serial.println(wmqttChan);
-    stepAddr += 128;
-  }
-
+  stepAddr = writeEeprom(wssid, stepAddr);
+  stepAddr = writeEeprom(wpassw, (stepAddr+32));
+  /*stepAddr = writeEeprom(wmqttHost, (stepAddr+64));
+  stepAddr = writeEeprom(wmqttPort, (stepAddr+128));
+  stepAddr = writeEeprom(wmqttUser, (stepAddr+6));
+  stepAddr = writeEeprom(wmqttPass, (stepAddr+32));
+  stepAddr = writeEeprom(wmqttChan, (stepAddr+64));
   if (strlen(config.uuid) == 0) {
-    String uuid = buildUuid();
+    String myUuid = buildUuid();
+    stepAddr = writeEeprom(myUuid, (stepAddr+128));
+  }*/
 
-    for (int i = 0; i < uuid.length(); ++i) {
-      EEPROM.write(stepAddr+i, uuid[i]);
+  delay(100);
+  getParametersFromEeprom();
+}
+
+int writeEeprom(String value, int stepAddr) {
+  Serial.print("stepAddr");
+  Serial.println(stepAddr);
+  if (value.length() > 1) {
+    for (int i = 0; i < value.length(); ++i) {
+      EEPROM.write(stepAddr+i, value[i]);
     }
 
-    Serial.print("Write uuid : ");
-    Serial.println(uuid);
+    Serial.print("Write on EEPROM : ");
+    Serial.println(value);
+
+    EEPROM.commit();
   }
 
-  EEPROM.commit();
+  delay(1000);
+  return stepAddr;
 }
 
 bool checkEepromValues() {
