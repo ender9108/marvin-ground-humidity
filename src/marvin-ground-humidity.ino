@@ -88,9 +88,9 @@ void setup() {
     }
 
     // 3600e6 = 1 heure
-    ESP.deepSleep(3600e6);
+    // ESP.deepSleep(3600e6);
     // to debug deep sleep = 10s
-    // ESP.deepSleep(30e6);
+     ESP.deepSleep(10e6);
   }
 }
 
